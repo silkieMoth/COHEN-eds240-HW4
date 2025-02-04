@@ -1,0 +1,143 @@
+---
+title: "Spider Reporting Bias Exploration"
+author: "Joshua Paul Cohen"
+date: last-modified
+format:
+  html:
+    embed-resources: true # this ensures that your rendered .html file is self-contained, so we (your instructors) can open it and view all your work
+execute: 
+  warning: false
+messages: false
+---
+
+```{r}
+library(tidyverse)
+library(patchwork)
+
+spider_news <- read_delim(here::here('data', 'Data_spider_news_global.csv'), delim = '\t')
+species <- read_csv(here::here('data', 'species_export_20250112.csv'))
+```
+
+<!--This declares a CSS object that can be used to tab a whole block of text -->
+<style>
+    .tab-space {
+        padding-left: 60px; /* Add padding to simulate a tab */
+    }
+</style>
+
+## Data Wrangling and Setup
+
+#### Summary tables for graph 1: Spiders in the News by Language and Country
+```{r}
+spr_lang_summary <- spider_news %>% 
+  group_by(Language) %>% 
+  summarize(language_count = n()) %>% 
+  arrange(., desc(language_count))
+
+spr_country_summary <- spider_news %>% 
+  group_by(Country_search) %>% 
+  summarize(country_count = n()) %>% 
+  arrange(., desc(country_count)) %>% 
+  head(50)
+```
+
+
+#### Summary table for graph 2: Reporting Bias of Spiders
+```{r}
+bias_summary <- tibble(
+  bias_var = c('bite', 
+               'death', 
+               'photo_species', 
+               'photo_bite', 
+               'expert_opinion', 
+               'sensationalism',
+               'error'), 
+  percent = c(length(spider_news$Bite[spider_news$Bite == 1]) / nrow(spider_news) * 100, 
+            length(spider_news$Death[spider_news$Bite == 1]) / nrow(spider_news) * 100, 
+            length(spider_news$Figure_species[spider_news$Figure_species == 1]) / nrow(spider_news) * 100, 
+            length(spider_news$Figure_bite[spider_news$Figure_bite == 1]) / nrow(spider_news) * 100, 
+            nrow(spider_news[spider_news$Expert_arachnologist == 1 | spider_news$Expert_doctor == 1 | spider_news$Expert_others == 1, ]) / nrow(spider_news) * 100, 
+            length(spider_news$Sensationalism[spider_news$Figure_bite == 1]) / nrow(spider_news) * 100, 
+            nrow(spider_news[spider_news$Taxonomic_error == 1 | spider_news$Venom_error == 1 | spider_news$Anatomy_error == 1 | spider_news$Photo_error == 1, ]) / nrow(spider_news) * 100
+            )
+
+)
+```
+
+
+#### Summary table for graph 3: Top 20 species
+```{r}
+top_20_sp <- spider_news %>% 
+    group_by(Species) %>% 
+    summarize(species_count = n()) %>% 
+    filter(stringr::str_detect(Species, 'sp$') == FALSE) %>% 
+    arrange(., desc(species_count)) %>% 
+    head(20)
+```
+
+## Visualization
+
+#### Plot 1
+```{r, fig.asp=1.1}
+p1 <- ggplot(spr_country_summary, aes(fct_reorder(Country_search, country_count), country_count)) + 
+  geom_col() + 
+  coord_flip() + 
+  labs(y = 'Total Articles', 
+       x = 'Country') + 
+  theme_minimal() + 
+  theme(panel.grid.major.y = element_blank(), 
+        panel.grid.minor.y = element_blank())
+
+p2 <- ggplot(spr_lang_summary, aes(fct_reorder(Language, language_count), language_count)) + 
+  geom_col() + 
+  coord_flip() + 
+  labs(y = 'Total Articles', 
+       x = 'Language') + 
+  theme_minimal() + 
+  theme(panel.grid.major.y = element_blank(), 
+        panel.grid.minor.y = element_blank())
+
+p1 + p2 + 
+  plot_annotation(title = 'Spiders in the News by Country and Language', 
+                  theme = theme(plot.title = element_text(hjust = 0.5)))
+```
+
+#### Plot 2
+```{r}
+ggplot(bias_summary, aes(x = bias_var, percent)) + 
+  geom_col() + 
+  coord_flip() +
+  labs(x = 'Potential Area of Bias', 
+       y = 'Percentage of Articles with Given Area of Bias', 
+       title = 'Rate of Bias in Reporting of Spider Related Topics') + 
+  scale_x_discrete(labels = c('Reported on Bite', 'Reported on Death', 'Factual Error', 'Consulted with Expert', 'Photo of Bite Shown', 'Photo of Spider Shown', 'Sensationalistic')) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+#### Plot 3
+```{r}
+ggplot(top_20_sp, aes(fct_reorder(Species, species_count), species_count)) + 
+  geom_col() + 
+  coord_flip() + 
+  labs(x = 'Species', 
+       y = 'Number of Articles', 
+       title = 'Top 20 Species in the News Around the World')
+```
+
+## Questions
+
+1. What have you learned about your data? Have any potentially interesting patterns emerged?
+
+<p class="tab-space">The distribution of languages was about what I expected, except that I expected to see more articles in Chinese. This may just be an english language bias in the data. Furthermore, more than 60% of articles contain some sort of factual error, and only in less than 40% of the articles was any kind of expert consulted, which is notable even though I viewed these stats as an aggregate. Lastly, the top species in the dataset are often those that are notably venomous to humans or otherwise invasive, but the 7th most common species in the dataset was actually the yellow sac spider, who's danger to humans has been largely overstated in the cultural consciousness. I did not dive into what was said in any of the articles specifically.</p>
+
+2. In HW #1, you outlined some questions that you wanted to answer using these data. Have you made any strides towards answering those questions? If yes, how so? If no, what next steps do you need to take (e.g. I need to create X plot type, I still need to track down Y data, I need to restructure existing data so that you can visualize it in Z ways, etc.)?
+
+<p class="tab-space">For my question about bias in news about spiders, I can start with seeing how much error/bias there is by species. I can also look for common words in reporting. It seems that R can connect to Google Translate through an API with the `translateR` package, so the non-english articles can be included in that analysis, even if this is still prone to bias.</p>
+
+<p class="tab-space">It may be possible to crossreference species attributes with the news dataset using the `spidR` package. This connects directly to the World Spider Trait database. This could then be used to analyze public perceptions of spiders compared to how harmful they are in reality.</p>
+
+<p class="tab-space">It may also be interesting to connect this data to data about spider bites, or about news traffic.</p>
+
+3. What challenges do you foresee encountering with your data? These can be data wrangling and / or visualization challenges. 
+
+<p class="tab-space">Firstly, I would have to learn how to use the `translateR` and `spidR` packages if I plan on using them. Secondly, I am still not fully sure how to quantify bias. I can just use the data as it is to get a rough approximation. But if I plan on doing data scraping, that is something I will have to do a fair amount of research on. There is a lot of summarizing of the data itself in the dataset itself, in which I can find specific patterns by species, to see which species there is more cultural bias against.</p>
