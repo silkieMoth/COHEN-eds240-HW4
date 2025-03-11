@@ -1,0 +1,249 @@
+---
+title: "translate_test"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(polyglotr)
+
+spider_news <- read_delim(here::here('data', 'Data_spider_news_global.csv'), delim = '\t')
+```
+
+```{r}
+spider_news_translated <- spider_news %>% 
+  filter(Language != 'English') %>% 
+  select(Title) %>% 
+  polyglotr::google_translate_long_text()
+```
+
+```{r}
+
+translations <- c()
+
+chunks <- split(spider_news$Title, cut(seq_along(spider_news$Title), 124, labels=FALSE))
+
+for (chunk in 1:length(chunks)) {
+  
+
+  for(sentence in chunks[chunk]) {
+  
+      #---------------------
+      # Code to be executed
+      #---------------------
+    
+      translations <- c(translations, google_translate(sentence))
+
+  }
+  
+  paste("Chunk", chunk, "finished translating....")
+  
+}
+```
+
+```{r}
+test <- google_translate(spider_news$Title[1:10])
+```
+
+
+```{r}
+translations <- c()
+
+chunks <- split(spider_news$Title, cut(seq_along(spider_news$Title), 124, labels=FALSE))
+
+```
+```{r}
+for (i in 1:10) {
+  translated_ls <- google_translate(as.data.frame(chunk[i])$X1)
+  
+  translated_ls <- as.data.frame(translated_ls) %>% 
+    pivot_longer(cols = everything(), values_to = 'translations') %>% 
+    select(translations)
+  
+  translations <- c(translations, translated_ls)
+
+}
+
+
+# chunk1 <- google_translate(as.data.frame(chunks[1])$X1)
+# chunk2 <- google_translate(as.data.frame(chunks[2])$X1)
+# chunk3 <- google_translate(as.data.frame(chunks[3])$X1)
+# chunk4 <- google_translate(as.data.frame(chunks[4])$X1)
+# chunk5 <- google_translate(as.data.frame(chunks[5])$X1)
+# chunk6 <- google_translate(as.data.frame(chunks[6])$X1)
+# chunk7 <- google_translate(as.data.frame(chunks[7])$X1)
+# chunk8 <- google_translate(as.data.frame(chunks[8])$X1)
+# chunk9 <- google_translate(as.data.frame(chunks[9])$X1)
+# chunk10 <- google_translate(as.data.frame(chunks[10])$X1)
+
+
+```
+```{r}
+chunk11 <- chunks[11]
+chunk12 <- chunks[12]
+chunk13 <- chunks[13]
+chunk14 <- chunks[14]
+chunk15 <- chunks[15]
+chunk16 <- chunks[16]
+chunk17 <- chunks[17]
+chunk18 <- chunks[18]
+chunk19 <- chunks[19]
+chunk20 <- chunks[20]
+```
+```{r}
+chunk21 <- chunks[21]
+chunk22 <- chunks[22]
+chunk23 <- chunks[23]
+chunk24 <- chunks[24]
+chunk25 <- chunks[25]
+chunk26 <- chunks[26]
+chunk27 <- chunks[27]
+chunk28 <- chunks[28]
+chunk29 <- chunks[29]
+chunk30 <- chunks[30]
+```
+```{r}
+chunk31 <- chunks[31]
+chunk32 <- chunks[32]
+chunk33 <- chunks[33]
+chunk34 <- chunks[34]
+chunk35 <- chunks[35]
+chunk36 <- chunks[36]
+chunk37 <- chunks[37]
+chunk38 <- chunks[38]
+chunk39 <- chunks[39]
+chunk40 <- chunks[40]
+```
+```{r}
+chunk41 <- chunks[41]
+chunk42 <- chunks[42]
+chunk43 <- chunks[43]
+chunk44 <- chunks[44]
+chunk45 <- chunks[45]
+chunk46 <- chunks[46]
+chunk47 <- chunks[47]
+chunk48 <- chunks[48]
+chunk49 <- chunks[49]
+chunk50 <- chunks[50]
+```
+```{r}
+chunk51 <- chunks[51]
+chunk52 <- chunks[52]
+chunk53 <- chunks[53]
+chunk54 <- chunks[54]
+chunk55 <- chunks[55]
+chunk56 <- chunks[56]
+chunk57 <- chunks[57]
+chunk58 <- chunks[58]
+chunk59 <- chunks[59]
+chunk60 <- chunks[60]
+```
+```{r}
+chunk71 <- chunks[71]
+chunk72 <- chunks[72]
+chunk73 <- chunks[73]
+chunk74 <- chunks[74]
+chunk75 <- chunks[75]
+chunk76 <- chunks[76]
+chunk77 <- chunks[77]
+chunk78 <- chunks[78]
+chunk79 <- chunks[79]
+chunk80 <- chunks[80]
+```
+```{r}
+chunk81 <- chunks[81]
+chunk82 <- chunks[82]
+chunk83 <- chunks[83]
+chunk84 <- chunks[84]
+chunk85 <- chunks[85]
+chunk86 <- chunks[86]
+chunk87 <- chunks[87]
+chunk88 <- chunks[88]
+chunk89 <- chunks[89]
+chunk90 <- chunks[90]
+```
+```{r}
+chunk91 <- chunks[91]
+chunk92 <- chunks[92]
+chunk93 <- chunks[93]
+chunk94 <- chunks[94]
+chunk95 <- chunks[95]
+chunk96 <- chunks[96]
+chunk97 <- chunks[97]
+chunk98 <- chunks[98]
+chunk99 <- chunks[99]
+chunk100 <- chunks[100]
+```
+```{r}
+chunk101 <- chunks[101]
+chunk102 <- chunks[102]
+chunk103 <- chunks[103]
+chunk104 <- chunks[104]
+chunk105 <- chunks[105]
+chunk106 <- chunks[106]
+chunk107 <- chunks[107]
+chunk108 <- chunks[108]
+chunk109 <- chunks[109]
+chunk110 <- chunks[110]
+```
+```{r}
+chunk111 <- chunks[111]
+chunk112 <- chunks[112]
+chunk113 <- chunks[113]
+chunk114 <- chunks[114]
+chunk115 <- chunks[115]
+chunk116 <- chunks[116]
+chunk117 <- chunks[117]
+chunk118 <- chunks[118]
+chunk119 <- chunks[119]
+chunk120 <- chunks[120]
+chunk121 <- chunks[121]
+chunk122 <- chunks[122]
+chunk123 <- chunks[123]
+chunk124 <- chunks[124]
+
+```
+
+
+```{r}
+google_translate(spider_news$Title[1:50])
+```
+
+
+
+```{r}
+translate_col <- function(col, df){
+
+n_iter <- 50
+
+pb <- txtProgressBar(min = 0,      # Minimum value of the progress bar
+                     max = n_iter, # Maximum value of the progress bar
+                     style = 3,    # Progress bar style (also available style = 1 and style = 2)
+                     width = 50,   # Progress bar width. Defaults to getOption("width")
+                     char = "=")   # Character used to create the bar
+
+
+
+for(i in nrow(df)) {
+
+    #---------------------
+    # Code to be executed
+    #---------------------
+  
+   df$col[i] <- google_translate(df$col[i])
+  
+    #---------------------
+
+    # Sets the progress bar to the current state
+    setTxtProgressBar(pb, i)
+}
+
+close(pb) # Close the connection
+
+}
+```
+
+```{r}
+translate_col(spider_news$Title, spider_news)
+```
+

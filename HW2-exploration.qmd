@@ -111,7 +111,9 @@ ggplot(bias_summary, aes(x = bias_var, percent)) +
        y = 'Percentage of Articles with Given Area of Bias', 
        title = 'Rate of Bias in Reporting of Spider Related Topics') + 
   scale_x_discrete(labels = c('Reported on Bite', 'Reported on Death', 'Factual Error', 'Consulted with Expert', 'Photo of Bite Shown', 'Photo of Spider Shown', 'Sensationalistic')) +
-  theme(plot.title = element_text(hjust = 0.5))
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.y = element_blank())
 ```
 
 #### Plot 3

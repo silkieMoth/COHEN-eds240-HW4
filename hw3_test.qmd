@@ -1,0 +1,487 @@
+---
+title: "hw3_test"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(syuzhet)
+library(lubridate)
+library(tm)
+library(wordcloud)
+library(tidytext)
+library(textdata)
+
+
+spider_news <- read_delim(here::here('data', 'Data_spider_news_global.csv'), delim = '\t')
+
+population <- read_csv(here::here('data', 'world_population.csv'))
+
+wealth <- read_csv(here::here('data', 'wealth', 'API_NY.GDP.MKTP.CD_DS2_en_csv_v2_76261.csv'), skip = 3)
+```
+
+weigh the bias
+```{r}
+# spider_news_weighed <- spider_news 
+# 
+# 
+# 
+# spider_news_weighed[27:38] <- spider_news_weighed %>% 
+#   
+#   select(Bite:Photo_error) %>% 
+#   
+#   replace_na()
+
+
+  
+spider_news_weighed <- spider_news %>% 
+  
+  # impacts to bias score assigned arbitrarily
+  mutate(
+    
+         # account for NAs
+         Bite = replace_na(Bite, 1), 
+         Death = replace_na(Death, 1), 
+         Figure_species = replace_na(Figure_species, 1), 
+         Figure_bite = replace_na(Figure_bite, 1), 
+         
+         # having an expert will reduce bias score
+         Expert_arachnologist = replace_na(Expert_arachnologist, 1),
+         Expert_doctor = replace_na(Expert_doctor, 1),
+         Expert_others = replace_na(Expert_others, 1), 
+         
+         # sensationalism give sever bias penalty
+         Sensationalism = replace_na(Sensationalism, 1),
+         
+         # multiple types of error will compound
+         Taxonomic_error = replace_na(Taxonomic_error, 1),
+         Venom_error = replace_na(Venom_error, 1),
+         Anatomy_error = replace_na(Anatomy_error, 1),
+         Photo_error = replace_na(Photo_error, 1),
+    
+         Bite = Bite * 1,
+         Death = Death * 1, 
+         Figure_species = Figure_species * 1, 
+         Figure_bite = Figure_bite * 2, 
+         
+         # having an expert will reduce bias score
+         Expert_arachnologist = Expert_arachnologist * -2,
+         Expert_doctor = Expert_doctor * -1,
+         Expert_others = Expert_others * -1, 
+         
+         # sensationalism give sever bias penalty
+         Sensationalism = Sensationalism * 5,
+         
+         # multiple types of error will compound
+         Taxonomic_error = case_when(
+           Taxonomic_error != 0 ~ Taxonomic_error * 2, 
+           Taxonomic_error == 0 | is.na(Taxonomic_error) == TRUE ~ 1),
+         Venom_error = case_when(
+           Venom_error != 0 ~ Venom_error * 2, 
+           Venom_error == 0 | is.na(Venom_error) == TRUE ~ 1),
+         Anatomy_error = case_when(
+           Anatomy_error != 0 ~ Anatomy_error * 2, 
+           Anatomy_error == 0 | is.na(Anatomy_error) == TRUE ~ 1),
+         Photo_error = case_when(
+           Photo_error != 0 ~ Photo_error * 2, 
+           Photo_error == 0 | is.na(Photo_error) == TRUE ~ 1),
+         
+         Total_error = Bite + Death + Figure_species + (Taxonomic_error * Venom_error * Anatomy_error * Photo_error)
+         
+         )
+```
+
+clean and subset population dataset
+```{r}
+population_sub <- population %>% 
+  janitor::clean_names() %>%
+  select(country_territory, x2022_population) %>% 
+  mutate(country_territory = case_match(country_territory, 
+    'Bosnia and Herzegovina' ~ 'Bosnia', 
+    'United Kingdom' ~ 'UK', 
+    'United States' ~ 'USA', 
+    .default = country_territory))
+```
+
+clean and subset wealth dataset
+```{r}
+wealth_sub <- wealth %>% 
+  janitor::clean_names() %>% 
+  select(country_name, x2023, x2022, x2014) %>% 
+  mutate(country_name = case_match(country_name, 
+    'Bosnia and Herzegovina' ~ 'Bosnia', 
+    'Czechia' ~ 'Czech Republic', 
+    'Egypt, Arab Rep.' ~ 'Egypt', 
+    'Iran, Islamic Rep.' ~ 'Iran', 
+    "Cote d'Ivoire" ~ 'Ivory Coast', 
+    'Kyrgyz Republic' ~ 'Kyrgyzstan',
+    'Russian Federation' ~ 'Russia', 
+    'Korea, Rep.' ~ 'South Korea',
+    'Turkiye' ~ 'Turkey', 
+    'United Kingdom' ~ 'UK', 
+    'United States' ~ 'USA', 
+    'Venezuela, RB' ~ 'Venezuela',
+    'Syrian Arab Republic' ~ 'Syria', 
+    .default = country_name)) %>% 
+  filter(country_name != 'Venezuela')
+
+# NOTE: palestine, taiwan, venezuela omitted from world bank dataset
+
+```
+
+
+```{r}
+spider_news_weighed %>% 
+  group_by(Total_error) %>% 
+  summarize(count = n()) %>% 
+  ggplot(aes(x = as.factor(Total_error), y = count)) + 
+  geom_col()
+```
+```{r}
+spider_news_weighed %>% 
+  group_by(Country_search) %>% 
+  summarize(avg_bias = mean(Total_error)) %>% 
+  filter(avg_bias > 5) %>% 
+  na.omit() %>% 
+  left_join(population_sub, by = join_by(Country_search == country_territory)) %>% 
+  
+  
+  ggplot(aes(x = Country_search, y = sort(avg_bias))) + 
+  geom_col() + 
+  coord_flip() + 
+  labs(title = 'Countries Most biased against spiders in the news', 
+       y = 'Average Reporting Bias', 
+       caption = "Limitations: wealth and population not accounted for in estimate,\nweights to different biases assigned arbitrarily") + 
+  theme_minimal() + 
+  theme(panel.grid = element_blank(),
+        axis.title.y = element_blank())
+```
+
+```{r}
+spider_news_weighed %>% 
+  group_by(Country_search) %>% 
+  na.omit() %>% 
+  summarize(avg_bias = mean(Total_error)) %>%
+  left_join(population_sub, by = join_by(Country_search == country_territory)) %>% mutate(bias_per_cap = avg_bias/(x2022_population / 10e6)) %>% 
+  filter(bias_per_cap > 5) %>% 
+  
+  
+  ggplot(aes(x = Country_search, y = sort(bias_per_cap))) +
+  geom_col() +
+  coord_flip() +
+  labs(title = 'Countries Most biased against spiders in the news',
+       y = 'Average Reporting Bias',
+       caption = "Limitations: wealth and population not accounted for in estimate,\nweights to different biases assigned arbitrarily") +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.title.y = element_blank())
+```
+
+```{r}
+df_gdp <- spider_news_weighed %>% 
+  group_by(Country_search) %>% 
+  na.omit() %>% 
+  summarize(avg_bias = mean(Total_error)) %>%
+  full_join(wealth_sub, by = join_by(Country_search == country_name)) %>% 
+#  filter(is.na(x2023) == TRUE) %>% 
+  filter(Country_search != 'Palestine' & Country_search != 'Taiwan') %>% 
+  mutate(gdp = case_when(
+    is.na(x2023) == FALSE ~ x2023, 
+    is.na(x2023) == TRUE & is.na(x2022) == FALSE ~ x2022,
+    is.na(x2023) == TRUE & is.na(x2022) == TRUE & is.na(x2014) == FALSE ~ x2014
+  )) %>% 
+  select(Country_search, avg_bias, gdp) %>%
+  filter(is.na(avg_bias) == FALSE)
+
+
+df_pop <- spider_news_weighed %>% 
+  group_by(Country_search) %>% 
+  na.omit() %>% 
+  summarize(avg_bias = mean(Total_error)) %>%
+  left_join(population_sub, by = join_by(Country_search == country_territory))
+
+df_full <- left_join(df_gdp, df_pop, by = 'Country_search') %>% 
+  select(-avg_bias.y) %>% 
+  rename('avg_bias' = 'avg_bias.x',
+         'population' = 'x2022_population', 
+         'country' = 'Country_search')
+```
+
+```{r}
+  ggplot() +
+  geom_point(data = df_full, 
+             mapping = aes(x = avg_bias, 
+                           y = gdp, 
+                           size = population), 
+             show.legend = FALSE) +
+  
+  geom_point(data = subset(df_full, avg_bias > 8), 
+             mapping = aes(x = avg_bias, 
+                           y = gdp, 
+                           size = population), 
+             color = 'red', 
+             show.legend = FALSE) + 
+  geom_text(data = subset(df_full, avg_bias > 8), 
+            mapping = aes(x = avg_bias, 
+                          y = gdp, 
+                          label = country), 
+            size = 3, 
+            position = position_jitter(0.5, 3e12, 20), 
+            fontface = 'bold') + 
+  
+  geom_point(data = subset(df_full, gdp > 1e13), 
+             mapping = aes(x = avg_bias, 
+                           y = gdp, 
+                           size = population), 
+             color = 'yellow', 
+             show.legend = FALSE) + 
+  geom_text(data = subset(df_full, gdp > 1e13), 
+            mapping = aes(x = avg_bias, 
+                          y = gdp, 
+                          label = country), 
+            nudge_x = 0.7, 
+            nudge_y = 2e12, 
+            fontface = 'bold') + 
+  geom_curve(aes(x = c(8.5, 9.3, 9.55, 11), 
+                 y = c(-1e12, 2e12, -1.7e12, 2e12), 
+                 xend = c(8.7, 9.05, 9.95, 10.75), 
+                 yend = c(1e12, 0, 7e11, -3e11)), 
+             curvature = c(-1.2), 
+             lwd = 0.7, 
+             arrow = arrow(type = 'closed', length = unit(0.2, 'cm'))) + 
+#  coord_flip() +
+  labs(title = 'Countries Most biased against spiders in the news,by GDP and population', 
+       x = 'Average Reporting Bias', 
+       y = 'GDP ($)',
+       caption = "All GDPs from 2023, except Lebanon and Syria which were from 2022\nLimitations: weights to different biases assigned arbitrarily") +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+
+```
+
+```{r}
+all_english <- spider_news %>% 
+  filter(Language == 'English') %>% 
+  select(Title) %>% as_vector() %>% VectorSource() %>% 
+  SimpleCorpus()
+
+all_english_senti <- all_english %>% 
+  tm_map(tolower) %>% 
+  tm_map(removePunctuation) %>% 
+  tm_map(removeNumbers) %>% 
+  tm_map(removeWords, stopwords('english')) %>% 
+#  tm_map(stemDocument) %>%
+  tm_map(stripWhitespace)
+
+tdm <- TermDocumentMatrix(all_english_senti) %>% as.matrix()
+
+row_sums <- rowSums(tdm)
+```
+
+```{r}
+sentiment_tib <- enframe(row_sums, name = "word", value = "count")
+```
+
+```{r}
+ggplot(subset(sentiment_tib, count > 50), aes(word, sort(count))) +
+  geom_col() +
+  coord_flip()
+```
+
+```{r}
+wordcloud(words = names(row_sums),
+          freq = row_sums,
+          max.words = 150,
+          random.order = TRUE,
+          min.freq = 5,
+          colors = brewer.pal(8, 'Dark2'),
+          scale = c(2.7, 0.8),
+          rot.per = 0.7, 
+          use.r.layout = FALSE)
+```
+
+
+```{r}
+sentiment <- row_sums %>% 
+  iconv() %>% 
+  get_nrc_sentiment()
+```
+
+```{r}
+sentiment2 = c()
+
+for (i in row_sums) {
+  
+sentiment2 <- c(sentiment2, syuzhet::get_sent_values(i))
+}
+```
+
+
+try affin sentiment anaylsis
+* afinn style assigns whole number values to positive and negative
+```{r}
+# Convert to data frame (same as above)
+afinn_prep_df <- all_english <- spider_news %>% 
+  filter(Language == 'English') %>% 
+  select(Title) %>% rename('text' = 'Title')
+
+# Convert to lowercase (same as above)
+afinn_prep_df$text <- tolower(afinn_prep_df$text)
+
+# Remove punctuation (same as above)
+afinn_prep_df$text <- gsub("[[:punct:]]", "", afinn_prep_df$text)
+
+# Unnest the text into words (same as above)
+text_words <- afinn_prep_df %>%
+  tidytext::unnest_tokens(word, text)
+
+# depluralize words
+deplural <- text_words %>% 
+  mutate(word = pluralize::singularize(word))
+
+
+
+```
+
+
+
+```{r}
+# Load the AFINN lexicon
+afinn <- get_sentiments("afinn")
+
+# Join the text words with the AFINN lexicon
+sentiment_analysis_afinn <- text_words %>%
+  inner_join(afinn, by = "word")
+```
+
+touch up row_sums so it can be used in wordcloud
+```{r}
+# prepare new wordcloud df
+wordcloud_prep <- data.frame(names(row_sums), as_tibble(row_sums)) %>% 
+  rename(word = names.row_sums., frequency = value) %>%
+  mutate(word = pluralize::singularize(word)) %>%
+  group_by(word) %>% reframe(frequency = sum(frequency)) %>% 
+  filter(!word %in% c("spider")) %>% 
+  inner_join(afinn, by = "word")
+```
+
+
+```{r}
+# Summarize sentiment scores
+sentiment_summary_afinn <- sentiment_analysis_afinn %>%
+  group_by(value) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  arrange(desc(value))
+```
+
+
+make wordcloud again
+```{r}
+wordcloud(words = wordcloud_prep$word,
+          freq = wordcloud_prep$frequency,
+#          max.words = 75,
+          random.order = TRUE,
+          min.freq = 5,
+          colors = tail(brewer.pal(9, 'Purples'), 5),
+          scale = c(2.7, 0.8),
+          rot.per = 0, 
+          use.r.layout = FALSE)
+
+```
+
+
+```{r}
+extrafont::loadfonts("win", quiet = FALSE)
+
+# Create a bar chart of sentiment scores for AFINN
+afinn_plot <- ggplot(sentiment_summary_afinn, aes(x = as.factor(value), y = count, fill = as.factor(value))) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  coord_radial(inner.radius = 0.4,
+               r.axis.inside = TRUE, 
+               start = -1.2*pi, end = 0.2*pi, 
+               clip = "off") +
+#  geom_text(data = unique(sentiment_summary_afinn)[1,], aes(label = "test", x = , y = 0.5), inherit.aes = FALSE) +
+  labs(title = "Sentiment Analysis Using AFINN Lexicon",
+       x = "Sentiment Score",
+       y = "Count") +
+  scale_fill_manual(values = RColorBrewer::brewer.pal(n = 8, name = 'RdBu')) + 
+  theme_minimal() + 
+  theme(
+    axis.title = element_blank(), 
+#    axis.title.x = element_text(angle = 307, hjust = -17, vjust = -4, size = 11, family = "Ink Free", face = "bold")
+    plot.title = element_text(family = "Ink Free", face = "bold"), 
+    axis.text.theta = element_text(family = "Ink Free", face = "bold")
+  )
+
+
+cowplot::ggdraw(afinn_plot) +
+ cowplot::draw_text('Sentiment Score', x = 0.7, y = 0.32, angle = 307, size = 11, family = "Ink Free", fontface = "bold")
+```
+
+try nrc
+```{r, fig.asp=1.5}
+nrc <- get_sentiments("nrc")
+
+# Join the text words with the NRC lexicon
+sentiment_analysis_nrc <- text_words %>%
+  inner_join(nrc, by = "word")
+
+# Summarize sentiment counts
+sentiment_summary_nrc <- sentiment_analysis_nrc %>%
+  count(sentiment, sort = TRUE)
+```
+
+```{r}
+# Create a bar chart of sentiment counts
+nrc_plot <- ggplot(sentiment_summary_nrc, aes(x = reorder(sentiment, n), y = n*10^-3, fill = sentiment)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  coord_radial(inner.radius = 0.4,
+             r.axis.inside = TRUE, 
+             start = -1.2*pi, end = 0.2*pi) +
+  labs(title = "Sentiment Analysis Using NRC Lexicon",
+       x = "Sentiment",
+       y = "Count") +
+  theme_minimal() + 
+  theme(
+    axis.title = element_blank(), 
+#    axis.title.x = element_text(angle = 307, hjust = -17, vjust = -4, size = 11, family = "Ink Free", face = "bold")
+    plot.title = element_text(family = "Ink Free", face = "bold"), 
+    axis.text.theta = element_text(family = "Ink Free", face = "bold")
+  )
+
+
+cowplot::ggdraw(nrc_plot) +
+ cowplot::draw_text('Sentiment Score (10^3)', x = 0.7, y = 0.32, angle = 307, size = 11, family = "Ink Free", fontface = "bold")
+#  cowplot::draw_plot_label('Sentiment Score (10^3)', x = 0.7, y = 0.5, angle = 307, size = 11, family = "Ink Free", fontface = "bold")
+```
+
+```{r}
+# Create a bar chart of sentiment counts
+nrc_plot <- ggplot(sentiment_summary_nrc, aes(x = reorder(sentiment, n), y = n*10^-3, fill = sentiment)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  coord_radial(inner.radius = 0.4,
+             r.axis.inside = TRUE, 
+             start = -1.2*pi, end = 0.2*pi) +
+  labs(title = "Sentiment Analysis Using NRC Lexicon",
+       x = "Sentiment",
+       y = "Count") +
+  theme_minimal() + 
+  theme(
+    axis.title = element_blank(), 
+#    axis.title.x = element_text(angle = 307, hjust = -17, vjust = -4, size = 11, family = "Ink Free", face = "bold")
+    plot.title = element_text(family = "Ink Free", face = "bold"), 
+    axis.text.theta = element_text(family = "Ink Free", face = "bold")
+  )
+```
+
+```{r}
+label <- ggplot() +
+  geom_text(aes(x = 0.5, y = 0.5, label = "Your label with superscript x^2"), 
+            size = 6, parse = TRUE) +
+  theme_void()
+
+cow_label <- cowplot::ggdraw(label)
+ # cowplot::draw_text(bquote(Your~label~with~superscript~x^2), x = 0.7, y = 0.32, angle = 307, size = 11, family = "Ink Free", fontface = "bold")
+#  cowplot::draw_plot_label('Sentiment Score (10^3)', x = 0.7, y = 0.5, angle = 307, size = 11, family = "Ink Free", fontface = "bold")
+```
+
