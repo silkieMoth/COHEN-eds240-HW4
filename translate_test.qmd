@@ -52,6 +52,7 @@ translations <- c()
 chunks <- split(spider_news$Title, cut(seq_along(spider_news$Title), 124, labels=FALSE))
 
 ```
+
 ```{r}
 for (i in 1:10) {
   translated_ls <- google_translate(as.data.frame(chunk[i])$X1)
@@ -212,38 +213,81 @@ google_translate(spider_news$Title[1:50])
 
 
 ```{r}
-translate_col <- function(col, df){
+
+
+translate_col <- function(col, j, k){
 
 n_iter <- 50
 
-pb <- txtProgressBar(min = 0,      # Minimum value of the progress bar
-                     max = n_iter, # Maximum value of the progress bar
+chunks <- split(col, cut(seq_along(col), length(col)/n_iter, labels=FALSE))
+
+translations <- c()
+
+pb <- txtProgressBar(min = j,      # Minimum value of the progress bar
+                     max = k, # Maximum value of the progress bar
                      style = 3,    # Progress bar style (also available style = 1 and style = 2)
                      width = 50,   # Progress bar width. Defaults to getOption("width")
                      char = "=")   # Character used to create the bar
 
 
 
-for(i in nrow(df)) {
+for(i in j:k) {
 
     #---------------------
     # Code to be executed
     #---------------------
   
-   df$col[i] <- google_translate(df$col[i])
+  translations <- tryCatch(
+    expr = {
+  
+  
+   translated <- google_translate(unlist(chunks[i]))
+   
+   translations <- rbind(translations, data.frame(x = matrix(translated, nrow=132, byrow=TRUE),stringsAsFactors=FALSE))
+   
+    },
+   
+    error = function(e) {
+      paste(NA)
+    }
+  )
   
     #---------------------
 
     # Sets the progress bar to the current state
     setTxtProgressBar(pb, i)
+   
+   paste("Chunk num:", i)
+   
+   Sys.sleep(5)
 }
+
+return(translations)
 
 close(pb) # Close the connection
 
 }
 ```
 
+
 ```{r}
-translate_col(spider_news$Title, spider_news)
+news_translated_1 <- translate_col(spider_news$Title, 1, length(chunks)/2)
+```
+```{r}
+news_translated_2 <- translate_col(Filter(function(x) x != "No title", spider_news$Title), length(chunks)/2 + 1, (length(chunks)/2) + 27)
+```
+
+```{r}
+news_translated_3 <- translate_col(Filter(function(x) x != "No title", spider_news$Title), (length(chunks)/2) + 28, (length(chunks)/2) + 40)
+
+```
+
+
+```{r}
+news_translated_4 <- translate_col(Filter(function(x) x != "No title", spider_news$Title), (length(chunks)/2) + 41, length(chunks))
+```
+
+```{r}
+full_translations <- rbind(news_translated_1, news_translated_2, news_translated_3, news_translated_4)
 ```
 
