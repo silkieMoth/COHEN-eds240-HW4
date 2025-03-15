@@ -18,15 +18,25 @@ spider_news <- read_delim(here::here('data', 'Data_spider_news_global.csv'), del
 population <- read_csv(here::here('data', 'world_population.csv'))
 
 wealth <- read_csv(here::here('data', 'wealth', 'API_NY.GDP.MKTP.CD_DS2_en_csv_v2_76261.csv'), skip = 3)
+
+deaths <- read_csv(here::here("data", "Morticd10_part6.csv"))
+
+deaths2 <- read_csv(here::here("data", "NCHS_-_Leading_Causes_of_Death__United_States.csv"))
+
+deaths3 <- read_csv(here::here("data", "Monthly_Counts_of_Deaths_by_Select_Causes__2014-2019.csv"))
+
+deaths4 <- read_csv(here::here("data", "mortality_proj", "USA_sdr_long_idr.csv"))
+
+spider_tolerance <- read_delim(here::here("data", "SpiDa", "SpiDa_filtered.csv"), delim = ";")
 ```
 
 weigh the bias
 ```{r}
-# spider_news_weighed <- spider_news 
+# spider_news_weighted <- spider_news 
 # 
 # 
 # 
-# spider_news_weighed[27:38] <- spider_news_weighed %>% 
+# spider_news_weighted[27:38] <- spider_news_weighted %>% 
 #   
 #   select(Bite:Photo_error) %>% 
 #   
@@ -34,7 +44,7 @@ weigh the bias
 
 
   
-spider_news_weighed <- spider_news %>% 
+spider_news_weighted <- spider_news %>% 
   
   # impacts to bias score assigned arbitrarily
   mutate(
@@ -131,14 +141,14 @@ wealth_sub <- wealth %>%
 
 
 ```{r}
-spider_news_weighed %>% 
+spider_news_weighted %>% 
   group_by(Total_error) %>% 
   summarize(count = n()) %>% 
   ggplot(aes(x = as.factor(Total_error), y = count)) + 
   geom_col()
 ```
 ```{r}
-spider_news_weighed %>% 
+spider_news_weighted %>% 
   group_by(Country_search) %>% 
   summarize(avg_bias = mean(Total_error)) %>% 
   filter(avg_bias > 5) %>% 
@@ -158,7 +168,7 @@ spider_news_weighed %>%
 ```
 
 ```{r}
-spider_news_weighed %>% 
+spider_news_weighted %>% 
   group_by(Country_search) %>% 
   na.omit() %>% 
   summarize(avg_bias = mean(Total_error)) %>%
@@ -178,7 +188,7 @@ spider_news_weighed %>%
 ```
 
 ```{r}
-df_gdp <- spider_news_weighed %>% 
+df_gdp <- spider_news_weighted %>% 
   group_by(Country_search) %>% 
   na.omit() %>% 
   summarize(avg_bias = mean(Total_error)) %>%
@@ -194,7 +204,7 @@ df_gdp <- spider_news_weighed %>%
   filter(is.na(avg_bias) == FALSE)
 
 
-df_pop <- spider_news_weighed %>% 
+df_pop <- spider_news_weighted %>% 
   group_by(Country_search) %>% 
   na.omit() %>% 
   summarize(avg_bias = mean(Total_error)) %>%
@@ -385,7 +395,8 @@ wordcloud(words = wordcloud_prep$word,
           colors = tail(brewer.pal(9, 'Purples'), 5),
           scale = c(2.7, 0.8),
           rot.per = 0, 
-          use.r.layout = FALSE)
+          use.r.layout = FALSE, 
+          family = "Ink Free")
 
 ```
 
@@ -453,11 +464,190 @@ nrc_plot <- ggplot(sentiment_summary_nrc, aes(x = reorder(sentiment, n), y = n*1
 cowplot::ggdraw(nrc_plot) +
  cowplot::draw_text('Sentiment Score (10^3)', x = 0.7, y = 0.32, angle = 307, size = 11, family = "Ink Free", fontface = "bold")
 #  cowplot::draw_plot_label('Sentiment Score (10^3)', x = 0.7, y = 0.5, angle = 307, size = 11, family = "Ink Free", fontface = "bold")
+
+#ggsave("figs/nrc_temp.png")
+```
+
+# we'll do the same thing but we are going to separate by countries with high and low bias
+
+## prepare words
+```{r}
+# high bias 
+all_english_hb <- spider_news_weighted %>% 
+  filter(Language == 'English', 
+         Total_error > 3) %>% 
+  select(Title) %>% as_vector() %>% VectorSource() %>% 
+  SimpleCorpus()
+
+all_english_hb_senti <- all_english_hb %>% 
+  tm_map(tolower) %>% 
+  tm_map(removePunctuation) %>% 
+  tm_map(removeNumbers) %>% 
+  tm_map(removeWords, stopwords('english')) %>% 
+#  tm_map(stemDocument) %>%
+  tm_map(stripWhitespace)
+
+tdm_hb <- TermDocumentMatrix(all_english_hb_senti) %>% as.matrix()
+
+row_sums_hb <- rowSums(tdm_hb)
+
+rm(all_english_hb, all_english_hb_senti, tdm_hb)
+
+
+
+# low bias 
+all_english_lb <- spider_news_weighted %>% 
+  filter(Language == 'English', 
+         Total_error <= 3) %>% 
+  select(Title) %>% as_vector() %>% VectorSource() %>% 
+  SimpleCorpus()
+
+all_english_lb_senti <- all_english_lb %>% 
+  tm_map(tolower) %>% 
+  tm_map(removePunctuation) %>% 
+  tm_map(removeNumbers) %>% 
+  tm_map(removeWords, stopwords('english')) %>% 
+#  tm_map(stemDocument) %>%
+  tm_map(stripWhitespace)
+
+tdm_lb <- TermDocumentMatrix(all_english_lb_senti) %>% as.matrix()
+
+row_sums_lb <- rowSums(tdm_lb)
+
+rm(all_english_lb, all_english_lb_senti, tdm_lb)
+```
+
+## make wordcloud dfs
+```{r}
+# high bias
+wordcloud_prep_hb <- data.frame(names(row_sums_hb), as_tibble(row_sums_hb)) %>% 
+  rename(word = colnames(.)[[1]], frequency = colnames(.)[[2]]) %>%
+  mutate(word = pluralize::singularize(word)) %>%
+  group_by(word) %>% reframe(frequency = sum(frequency)) %>%
+  filter(!word %in% c("spider")) %>%
+  inner_join(afinn, by = "word")
+
+# low bias
+wordcloud_prep_lb <- data.frame(names(row_sums_lb), as_tibble(row_sums_lb)) %>% 
+  rename(word = colnames(.)[[1]], frequency = colnames(.)[[2]]) %>%
+  mutate(word = pluralize::singularize(word)) %>%
+  group_by(word) %>% reframe(frequency = sum(frequency)) %>% 
+  filter(!word %in% c("spider")) %>% 
+  inner_join(afinn, by = "word")
+```
+
+## make wordclouds themselves
+```{r}
+# high bias
+wordcloud(words = wordcloud_prep_hb$word,
+          freq = wordcloud_prep_hb$frequency,
+          random.order = TRUE,
+          min.freq = 4,
+          colors = tail(brewer.pal(9, 'Purples'), 5),
+          scale = c(2.7, 0.8),
+          rot.per = 0, 
+          use.r.layout = FALSE, 
+          family = "Ink Free")
+
+#save.image("figs/wordcloud_temp.png")
 ```
 
 ```{r}
+
+wordcloud(words = wordcloud_prep_lb$word,
+          freq = wordcloud_prep_lb$frequency,
+#          max.words = 75,
+          random.order = TRUE,
+          min.freq = 4,
+          colors = tail(brewer.pal(9, 'Purples'), 5),
+          scale = c(2.7, 0.8),
+          rot.per = 0, 
+          use.r.layout = FALSE, 
+          family = "Ink Free")
+```
+
+# now make the nrc sentiment analysis
+
+## nrc prep
+```{r}
+# get nrc sentiments
+nrc <- get_sentiments("nrc")
+
+# high bias
+
+# Convert to data frame (same as above)
+nrc_prep_hb_df <- all_english <- spider_news_weighted %>% 
+  filter(Language == 'English', 
+         Total_error > 2) %>% 
+  select(Title) %>% rename('text' = 'Title')
+
+# Convert to lowercase (same as above)
+nrc_prep_hb_df$text <- tolower(nrc_prep_hb_df$text)
+
+# Remove punctuation (same as above)
+nrc_prep_hb_df$text <- gsub("[[:punct:]]", "", nrc_prep_hb_df$text)
+
+# Unnest the text into words (same as above)
+text_words_hb <- nrc_prep_hb_df %>%
+  tidytext::unnest_tokens(word, text)
+
+# depluralize words
+text_words_hb <- text_words_hb %>% 
+  mutate(word = pluralize::singularize(word))
+
+# Join the text words with the NRC lexicon
+sentiment_analysis_hb_nrc <- text_words_hb %>%
+  inner_join(nrc, by = "word")
+
+# Summarize sentiment counts
+sentiment_summary_hb_nrc <- sentiment_analysis_hb_nrc %>%
+  count(sentiment, sort = TRUE)
+
+
+rm(nrc_prep_hb_df, text_words_hb, sentiment_analysis_hb_nrc)
+
+
+# low bias
+
+# Convert to data frame (same as above)
+nrc_prep_lb_df <- all_english <- spider_news_weighted %>% 
+  filter(Language == 'English' , 
+         Total_error <= 2) %>% 
+  select(Title) %>% rename('text' = 'Title')
+
+# Convert to lowercase (same as above)
+nrc_prep_lb_df$text <- tolower(nrc_prep_lb_df$text)
+
+# Remove punctuation (same as above)
+nrc_prep_lb_df$text <- gsub("[[:punct:]]", "", nrc_prep_lb_df$text)
+
+# Unnest the text into words (same as above)
+text_words_lb <- nrc_prep_lb_df %>%
+  tidytext::unnest_tokens(word, text)
+
+# depluralize words
+text_words_lb <- text_words_lb %>% 
+  mutate(word = pluralize::singularize(word))
+
+# Join the text words with the NRC lexicon
+sentiment_analysis_lb_nrc <- text_words_lb %>%
+  inner_join(nrc, by = "word")
+
+# Summarize sentiment counts
+sentiment_summary_lb_nrc <- sentiment_analysis_lb_nrc %>%
+  count(sentiment, sort = TRUE)
+
+rm(nrc_prep_lb_df, text_words_lb, sentiment_analysis_lb_nrc)
+
+
+```
+
+## make graphs
+```{r}
+# high bias
+
 # Create a bar chart of sentiment counts
-nrc_plot <- ggplot(sentiment_summary_nrc, aes(x = reorder(sentiment, n), y = n*10^-3, fill = sentiment)) +
+nrc_plot <- ggplot(sentiment_summary_hb_nrc, aes(x = reorder(sentiment, n), y = n*10^-3, fill = sentiment)) +
   geom_bar(stat = "identity", show.legend = FALSE) +
   coord_radial(inner.radius = 0.4,
              r.axis.inside = TRUE, 
@@ -472,16 +662,475 @@ nrc_plot <- ggplot(sentiment_summary_nrc, aes(x = reorder(sentiment, n), y = n*1
     plot.title = element_text(family = "Ink Free", face = "bold"), 
     axis.text.theta = element_text(family = "Ink Free", face = "bold")
   )
+
+
+cowplot::ggdraw(nrc_plot) +
+ cowplot::draw_text('Sentiment Score (10^3)', x = 0.7, y = 0.32, angle = 307, size = 11, family = "Ink Free", fontface = "bold")
 ```
 
 ```{r}
-label <- ggplot() +
-  geom_text(aes(x = 0.5, y = 0.5, label = "Your label with superscript x^2"), 
-            size = 6, parse = TRUE) +
-  theme_void()
+# low bias
 
-cow_label <- cowplot::ggdraw(label)
- # cowplot::draw_text(bquote(Your~label~with~superscript~x^2), x = 0.7, y = 0.32, angle = 307, size = 11, family = "Ink Free", fontface = "bold")
-#  cowplot::draw_plot_label('Sentiment Score (10^3)', x = 0.7, y = 0.5, angle = 307, size = 11, family = "Ink Free", fontface = "bold")
+# Create a bar chart of sentiment counts
+nrc_plot <- ggplot(sentiment_summary_lb_nrc, aes(x = reorder(sentiment, n), y = n*10^-3, fill = sentiment)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  coord_radial(inner.radius = 0.4,
+             r.axis.inside = TRUE, 
+             start = -1.2*pi, end = 0.2*pi) +
+  labs(title = "Sentiment Analysis Using NRC Lexicon",
+       x = "Sentiment",
+       y = "Count") +
+  theme_minimal() + 
+  theme(
+    axis.title = element_blank(), 
+#    axis.title.x = element_text(angle = 307, hjust = -17, vjust = -4, size = 11, family = "Ink Free", face = "bold")
+    plot.title = element_text(family = "Ink Free", face = "bold"), 
+    axis.text.theta = element_text(family = "Ink Free", face = "bold")
+  )
+
+
+cowplot::ggdraw(nrc_plot) +
+ cowplot::draw_text('Sentiment Score (10^3)', x = 0.7, y = 0.32, angle = 307, size = 11, family = "Ink Free", fontface = "bold")
+```
+
+just getting medically relevant spiders here
+```{r}
+unique_sp <- spider_news$Species %>% unique() %>% tm::stripWhitespace()
+
+medically_rel_sp <- unique_sp[
+    (
+    stringr::str_detect(unique_sp, "Loxosceles") == TRUE | 
+    stringr::str_detect(unique_sp, "Sicarius") == TRUE | 
+    stringr::str_detect(unique_sp, "Hexophthalma") == TRUE |
+    stringr::str_detect(unique_sp, "Latrodectus") == TRUE | 
+    stringr::str_detect(unique_sp, "Phoneutria") == TRUE | 
+    stringr::str_detect(unique_sp, "Atrax") == TRUE | 
+    stringr::str_detect(unique_sp, "Hadronyche") == TRUE | 
+    stringr::str_detect(unique_sp, "Missulena") == TRUE
+    ) & 
+      
+    is.na(unique_sp) == FALSE
+  ]
+
+
+spider_news_weighted <- spider_news_weighted %>% 
+                          mutate(medically_relevant = case_when(
+                              Species %in% medically_rel_sp ~ 1,
+                              .default = 0
+                            
+                              )
+                            )
+```
+
+```{r, fig.asp=0.7}
+# define function to calculate mode
+get_mode <- function(x) {
+  u <- unique(x)
+  tab <- tabulate(match(x, u))
+  u[tab == max(tab)]
+}
+
+spider_pnt_select <- filter(sp_med_counts, (medically_relevant == 0 & mean_bias > 3.5) | medically_relevant == 1)
+
+# curve_params <- data.frame(
+#   x = filter(sp_med_counts, (medically_relevant == 0 & mean_bias > 3.5) | medically_relevant == 1) %>% select(x_placement),
+#   x_add = c(0.01, 0.025, 0.035, 0.05, -0.01, -0.025, -0.035, -0.05, 
+#             0.01, 0.025, 0.035, 0.05, -0.01, -0.025, -0.035, -0.05), 
+# #  xend = 
+#   y = c(7.0, 6.9, 6.7, 6.2, 
+#         7.0, 6.9, 6.7, 6.2,
+#         7.0, 6.9, 6.7, 6.2,
+#         7.0, 6.9, 6.7, 6.2), 
+#   curvature = c(0.5,0.5,0.5,0.5,  -0.5,-0.5,-0.5,-0.5, 
+#                 0.5,0.5,0.5,0.5,  -0.5,-0.5,-0.5,-0.5)
+# )
+
+
+# curve_params <- expand_grid(
+#   x = filter(sp_med_counts, (medically_relevant == 0 & mean_bias > 3.5) | medically_relevant == 1) %>% select(x_placement),
+#   x_add = c(0.01, 0.025, 0.035, 0.05, -0.01, -0.025, -0.035, -0.05),
+#   y_mult = c(7.0, 6.9, 6.7, 6.2), 
+#   curvature = c(0.5,0.5,0.5,0.5,  -0.5,-0.5,-0.5,-0.5),
+# 
+# 
+# ) %>% 
+#   group_by(x) %>% 
+#   expand(x_add, .name_repair = make.names) %>% 
+#   ungroup() %>% 
+#   group_by(x, x_add) %>% 
+#   expand(y)
+
+
+
+
+
+
+# test <- expand.grid(split(
+#   x = filter(sp_med_counts, (medically_relevant == 0 & mean_bias > 3.5) | medically_relevant == 1) %>% select(x_placement),
+#     c(0.01, 0.025, 0.035, 0.05, -0.01, -0.025, -0.035, -0.05),
+#   ))
+
+# x = x_placement+0.01, 
+#        xend = x_placement, 
+#        y = mean_bias*5+2.8-0.8, 
+#        yend = mean_bias*5
+#        ))
+# x = x_placement+0.025, 
+#        xend = x_placement, 
+#        y = mean_bias*5+2.7-0.8, 
+#        yend = mean_bias*5
+# x = x_placement+0.035, 
+#        xend = x_placement, 
+#        y = mean_bias*5+2.5-0.8, 
+#        yend = mean_bias*5
+# x = x_placement+0.05, 
+#        xend = x_placement, 
+#        y = mean_bias*5+2-0.8, 
+#        yend = mean_bias*5
+
+
+sp_med_counts <- spider_news_weighted %>% 
+  group_by(Family) %>% 
+  summarize(mean_bias = mean(Total_error), 
+            medically_relevant = get_mode(medically_relevant)) %>% 
+  ungroup() %>% 
+  mutate(x_placement = case_when(
+              medically_relevant == 0 ~ seq(-0.55, 0.30, length.out = n()), 
+              medically_relevant == 1 ~ seq(0.75, 1.35, length.out = n())
+              )) %>%
+  mutate(Family = tm::stripWhitespace(Family))
+
+
+med_rel_counts <- sp_med_counts %>% 
+  group_by(medically_relevant) %>% 
+  summarize(mean_bias = mean(mean_bias), 
+            count = n())
+
+
+curve_params <- data.frame(
+    x = spider_pnt_select  %>% select(x_placement) %>% slice(rep(1:n(), each = 8)), 
+    x_add = data.frame(x_add = c(0.01, 0.025, 0.035, 0.05, -0.01, -0.025, -0.035, -0.05)) %>% slice(rep(row_number(), 1)), 
+    y = spider_pnt_select %>% rename(y = mean_bias) %>% select(y) %>% slice(rep(1:n(), each = 8)), 
+    y_mult = data.frame(y_mult = c(7.0-1.3, 6.9-1.3, 6.7-1.2, 6.2-0.8)) %>% slice(rep(row_number(), 2)), 
+    y_end_mult = rep(5, nrow(spider_pnt_select)),
+    curvature = data.frame(curvature = c(0.5,0.5,0.5,0.5,  -0.5,-0.5,-0.5,-0.5)) %>% slice(rep(row_number(), 1))
+)
+
+
+med_plot <- ggplot() +
+   geomwindmill::geom_windmill(
+     data = med_rel_counts, 
+     aes(
+       x = medically_relevant, 
+       y = count,, 
+       group = medically_relevant
+       ), 
+     fill = "burlywood", 
+     alpha = 0.5) + 
+  
+  
+  ggplot2::annotate("text", 
+                    x = c(0,1), 
+                    y = 41, 
+                    label = c(round(med_rel_counts$mean_bias[1], 2), 
+                              round(med_rel_counts$mean_bias[2], 2)), 
+                    family = "Mansalva", 
+                    size = 5.5) +
+  ggplot2::annotate("text", 
+                    x = c(0,1), 
+                    y = 44, 
+                    label = "~~~~Average Bias~~~~", 
+                    family = "Gaegu", 
+                    size = 5.5) +
+  
+  # geom_text(data = med_rel_counts, 
+  #           aes(
+  #             x = medically_relevant, 
+  #             y = count, 
+  #             label = round(mean_bias, 2)
+  #           ), 
+  #           family = "Ink Free", 
+  #           size = 5.5, 
+  #           nudge_y = -1
+  #           ) + 
+  # geom_text(data = med_rel_counts, 
+  #           aes(
+  #             x = medically_relevant, 
+  #             y = count, 
+  #             label = "~~~~Mean Bias~~~~"
+  #           ), 
+  #           family = "Ink Free", 
+  #           size = 5.5, 
+  #           nudge_y = -4
+  #           ) +
+   
+   
+   geom_point(
+     data = filter(sp_med_counts, 
+                   medically_relevant == 0 & mean_bias > 3.5), 
+     aes(x_placement, mean_bias*5), size = 4) + 
+   geom_point(
+     data = filter(sp_med_counts, 
+                   medically_relevant == 1), 
+     aes(x_placement, mean_bias*5), size = 4) + 
+   
+   
+   geom_segment(
+     data = filter(sp_med_counts, 
+                   medically_relevant == 0 & mean_bias > 3.5), 
+     aes(
+       x = x_placement, 
+       xend = x_placement, 
+       y = 0, 
+       yend = mean_bias*5
+       )) + 
+   geom_segment(
+     data = filter(sp_med_counts, 
+                   medically_relevant == 1), 
+     aes(
+       x = x_placement, 
+       xend = x_placement, 
+       y = 0, 
+       yend = mean_bias*5
+       )) + 
+  
+####--------LEGS START HERE----------   
+
+  # geom_curve(
+  #    data = filter(sp_med_counts,
+  #                  medically_relevant == 1 | mean_bias > 3.5),
+  #    aes(
+  #      x = x_placement+0.01,
+  #      xend = x_placement,
+  #      y = mean_bias*5+2.8-0.8,
+  #      yend = mean_bias*5
+  #      )) +
+  # geom_curve(
+  #    data = filter(sp_med_counts,
+  #                  medically_relevant == 1 | mean_bias > 3.5),
+  #    aes(
+  #      x = x_placement+0.025,
+  #      xend = x_placement,
+  #      y = mean_bias*5+2.7-0.8,
+  #      yend = mean_bias*5
+  #      )) +
+  # geom_curve(
+  #    data = filter(sp_med_counts,
+  #                  medically_relevant == 1 | mean_bias > 3.5),
+  #    aes(
+  #      x = x_placement+0.035,
+  #      xend = x_placement,
+  #      y = mean_bias*5+2.5-0.8,
+  #      yend = mean_bias*5
+  #      )) +
+  # geom_curve(
+  #    data = filter(sp_med_counts,
+  #                  medically_relevant == 1 | mean_bias > 3.5),
+  #    aes(
+  #      x = x_placement+0.05,
+  #      xend = x_placement,
+  #      y = mean_bias*5+2-0.8,
+  #      yend = mean_bias*5
+  #      )) +
+  # 
+  # 
+  # geom_curve(
+  #    data = filter(sp_med_counts,
+  #                  medically_relevant == 1 | mean_bias > 3.5),
+  #    aes(
+  #      x = x_placement-0.01,
+  #      xend = x_placement,
+  #      y = mean_bias*5+2.8-0.8,
+  #      yend = mean_bias*5
+  #      ),
+  #    curvature = -0.5) +
+  # geom_curve(
+  #    data = filter(sp_med_counts,
+  #                  medically_relevant == 1 | mean_bias > 3.5),
+  #    aes(
+  #      x = x_placement-0.025,
+  #      xend = x_placement,
+  #      y = mean_bias*5+2.7-0.8,
+  #      yend = mean_bias*5
+  #      ),
+  #    curvature = -0.5) +
+  # geom_curve(
+  #    data = filter(sp_med_counts,
+  #                  medically_relevant == 1 | mean_bias > 3.5),
+  #    aes(
+  #      x = x_placement-0.035,
+  #      xend = x_placement,
+  #      y = mean_bias*5+2.5-0.8,
+  #      yend = mean_bias*5
+  #      ),
+  #    curvature = -0.5) +
+  # geom_curve(
+  #    data = filter(sp_med_counts,
+  #                  medically_relevant == 1 | mean_bias > 3.5),
+  #    aes(
+  #      x = x_placement-0.05,
+  #      xend = x_placement,
+  #      y = mean_bias*5+2-0.8,
+  #      yend = mean_bias*5
+  #      ),
+  #    curvature = -0.5) +
+
+
+  geom_curve( 
+    data = filter(curve_params, curvature == 0.5),
+    aes(
+      x = x_placement+x_add,
+      xend = x_placement,
+      y = y*y_mult*0.95,
+      yend = y*5,
+    ), 
+    curvature = 0.5
+  ) + 
+  geom_curve( 
+    data = filter(curve_params, curvature == -0.5),
+    aes(
+      x = x_placement+x_add,
+      xend = x_placement,
+      y = y*y_mult*0.95,
+      yend = y*5,
+    ), 
+    curvature = -0.5
+  ) + 
+  
+  
+   
+  #  ggplot2::annotate("rect", 
+  #                    xmin = c(0.85-0.05,0.9,0.9) - 0.2, xmax = c(1.25+0.3,0.95,0.95) - 0.2, ymin = c(30,31,33), ymax = c(35,32,34),
+  #                    fill = c(NA, alpha('brown4', 0.5), alpha('brown2', 0.5)), color = "grey50") + 
+  # ggplot2::annotate("text", 
+  #                    x = c(0.95+0.27,0.95+0.23) - 0.2, y = c(31+0.3,33+0.3) + 0.1, 
+  #                   label = c("Not Medically Significant", "Medically Significant"), 
+  #                   size = 3, 
+  #                   family = "Ink Free", 
+  #                   fontface = "bold") +
+   scale_x_continuous(labels = c("","Not Medically Signficant", "", "Medically Significant", ""), 
+                      #limits = c(-1, 5), 
+                      #n.breaks = 5, 
+                      breaks = scales::extended_breaks()) + 
+   scale_y_reverse(expand = c(0,0), 
+                   limits = c(50, 0)) + 
+   coord_cartesian(clip = "off") +
+   scale_fill_gradient(high = 'brown2', low = 'brown4', breaks = NULL) + 
+   labs(x = "", 
+        y = "Number of Species/Family", 
+        title = "Of the spiders in the news,\nwhich should we even be concerned about?") +
+   theme(
+     panel.background = element_blank(), 
+     # panel.grid.major.x = element_line(color = alpha("chocolate4", 0.3), 
+     #                           linewidth = 1), 
+     #panel.grid = element_blank(),
+     #panel.background = element_rect(fill = alpha("burlywood", 0.3)),
+         axis.text = element_text(family = "Indie Flower", 
+                                  face = "bold",
+                                  size = 15), 
+         axis.title = element_text(family = "Indie Flower"), 
+         plot.title = element_text(family = "Jua", 
+                                   size = 20, 
+                                   hjust = 0.5))
+
+# for (i in 1:nrow(curve_params)){
+#   med_plot <- med_plot + geom_curve(
+#     data = filter(sp_med_counts, medically_relevant == 0 & mean_bias > 3.5),
+#     aes(x = x_placement+curve_params$x[i], 
+#         xend = x_placement, 
+#         y = mean_bias*curve_params$y[i],
+#         yend = mean_bias*5),
+#     curvature = curve_params$curvature[i]
+#   )
+# }
+
+
+
+med_plot
+```
+
+chance of dying in the us... (per 100k people)
+* from a venomous spider: 0.000078% (7.8)
+* all venomous animals: 0.000795% (79.5)
+* all nonvenomous animals: 0.001213% (121.3)
+* from homicide: 0.09121240% (9121.240)
+* from a car accident: 0.09637434% (9637.434)
+* from cancer: 3.382527% (338252.7)
+
+citations:
+Centers for Disease Control and Prevention, National Center for Health Statistics. National Vital Statistics System, Mortality 2018-2023 on CDC WONDER Online Database, released in 2024. Data are from the Multiple Cause of Death Files, 2018-2023, as compiled from data provided by the 57 vital statistics jurisdictions through the Vital Statistics Cooperative Program. Accessed at http://wonder.cdc.gov/ucd-icd10-expanded.html on Mar 14, 2025 9:42:37 AM
+
+Forrester, J. A., Holstege, C. P., & Forrester, J. D. (2012). Fatalities from venomous and nonvenomous animals in the United States (1999–2007). Wilderness & environmental medicine, 23(2), 146-152.
+
+```{r}
+deaths_agg <- deaths %>% 
+  mutate(total_deaths = rowSums(across(Deaths1:Deaths26), na.rm = TRUE)) %>%
+   group_by(Cause) %>% 
+   reframe(total = sum(total_deaths)) %>% 
+  # arrange(desc(total)) %>% 
+  # filter(Cause == 'A138')
+   filter(grepl("X8", Cause))
+
+deaths_agg 
+
+#unique(deaths_agg$Cause) %>% as_data_frame() %>% filter(grepl("E8", value))
+```
+
+```{r}
+deaths2 %>% 
+  filter(State == "United States") %>% 
+  group_by(`113 Cause Name`) %>% 
+  summarize(Deaths = sum(Deaths), 
+            death_100k = Deaths/100000)
+```
+
+```{r}
+deaths3 %>% 
+  select(-Jurisdiction.of.Occurrence, -Month, -Year) %>% 
+#  group_by(Year) %>% 
+  summarize(across(everything(), ~ mean(.x, na.rm = TRUE))) %>% 
+  pivot_longer(cols = everything(),
+               names_to = "cause", 
+               values_to = "death_tot") %>% 
+  mutate(death_100k = death_tot/100000)
+```
+
+```{r}
+deaths4 %>% 
+  select(cause, SDR2013) %>% 
+  group_by(cause) %>% 
+  reframe(std_death_tot = sum(SDR2013), 
+            death_100k = std_death_tot/100000) %>% 
+  slice(48:75) %>% 
+  summarize(cause = "cancer", 
+            std_death_tot = sum(std_death_tot), 
+            death_100k = sum(death_100k))
+```
+
+```{r}
+spider_tolerance %>% 
+  select(participant | (ends_with("sum") & starts_with("FSQ"))) %>% 
+  # pivot_wider(names_from = participant, 
+  #             names_prefix = "",
+  #             values_from = c(FSQ_1_sum), 
+  #             id_cols = c(FSQ_2_sum, FSQ_3_sum),
+  #             id_expand = TRUE) 
+  
+  ggplot(aes(x = FSQ_1_sum)) + 
+           geom_path()
+```
+```{r}
+spider_tolerance %>% 
+  select(participant | (ends_with("sum") & starts_with("FSQ")))
+```
+
+```{r}
+spider_tol_wide <- c() %>% rbind(spider_tolerance$participant, 
+                                 spider_tolerance$FSQ_1_sum, 
+                                 spider_tolerance$FSQ_2_sum, 
+                                 spider_tolerance$FSQ_3_sum) %>% 
+  as_data_frame() %>% 
+  cbind(c("participants", "FSQ_1_sum","FSQ_2_sum", "FSQ_3_sum")) %>% 
+  ggplot(aes(x = ))
 ```
 
