@@ -13,6 +13,7 @@ library(wordcloud)
 library(tidytext)
 library(textdata)
 library(patchwork)
+library(polyglotr)
 
 # --------------load_fonts-------------------
 extrafont::loadfonts("win", quiet = FALSE)
@@ -21,6 +22,8 @@ extrafont::loadfonts("win", quiet = FALSE)
 spider_news <- read_delim(here::here('data', 'Data_spider_news_global.csv'), delim = '\t')
 
 deaths <- read_csv(here::here("data", "Monthly_Counts_of_Deaths_by_Select_Causes__2014-2019.csv"))
+
+spider_tolerance <- read_delim(here::here("data", "SpiDa", "SpiDa_filtered.csv"), delim = ";")
 ```
 
 
@@ -29,28 +32,11 @@ weight the bias
   
 spider_news_weighted <- spider_news %>% 
   
+  # account for Nas
+  mutate(across(Bite:Photo_error, ~ replace_na(.,1))) %>% 
+  
   # impacts to bias score assigned arbitrarily
   mutate(
-    
-         # account for NAs
-         Bite = replace_na(Bite, 1), 
-         Death = replace_na(Death, 1), 
-         Figure_species = replace_na(Figure_species, 1), 
-         Figure_bite = replace_na(Figure_bite, 1), 
-         
-         # having an expert will reduce bias score
-         Expert_arachnologist = replace_na(Expert_arachnologist, 1),
-         Expert_doctor = replace_na(Expert_doctor, 1),
-         Expert_others = replace_na(Expert_others, 1), 
-         
-         # sensationalism give sever bias penalty
-         Sensationalism = replace_na(Sensationalism, 1),
-         
-         # multiple types of error will compound
-         Taxonomic_error = replace_na(Taxonomic_error, 1),
-         Venom_error = replace_na(Venom_error, 1),
-         Anatomy_error = replace_na(Anatomy_error, 1),
-         Photo_error = replace_na(Photo_error, 1),
     
          Bite = Bite * 1,
          Death = Death * 1, 
@@ -79,7 +65,7 @@ spider_news_weighted <- spider_news %>%
            Photo_error != 0 ~ Photo_error * 2, 
            Photo_error == 0 | is.na(Photo_error) == TRUE ~ 1),
          
-         Total_error = Bite + Death + Figure_species + (Taxonomic_error * Venom_error * Anatomy_error * Photo_error)
+         Total_error = Bite + Death + Figure_species + Expert_arachnologist + Expert_doctor + Expert_others + (Taxonomic_error * Venom_error * Anatomy_error * Photo_error)
          
          )
 ```
@@ -158,6 +144,10 @@ Reason for splitting titles into chunks and running function multiple times is b
 # 
 #  `google_translate()` is being passed strings containing characters or sequences of characters that are incompatible.
 #  `google_translate()` struggles to handle this large of a dataset.
+
+
+# split news titles into chunks
+chunks <- split(spider_news$Title, cut(seq_along(spider_news$Title), 124, labels=FALSE))
 
 # translate first half of titles
 news_translated_1 <- translate_col(spider_news$Title, 1, length(chunks)/2)
@@ -282,35 +272,75 @@ sentiment_analysis_nrc <- text_words %>%
 
 # Summarize sentiment counts
 sentiment_summary_nrc <- sentiment_analysis_nrc %>%
-  count(sentiment, sort = TRUE)
+  count(sentiment, sort = TRUE) %>% 
+  mutate(txt_angle_val = c(-100, -85, -68, -51+15, -34+10, -17+15, 0+20, 17+25, 34+30, 51+55), 
+         sentiment = factor(sentiment, levels = c('negative', 'fear', 'disgust', 'sadness', 'anger', 'trust', 'anticipation', 'joy', 'surprise', 'positive')))
 ```
 
 ```{r}
 # Create a bar chart of sentiment counts
-nrc_plot <- ggplot(sentiment_summary_nrc, aes(x = reorder(sentiment, n), y = n*10^-3, fill = sentiment)) +
-  geom_bar(stat = "identity", show.legend = FALSE) +
-  coord_radial(inner.radius = 0.4,
-             start = -1.2*pi, end = 0.2*pi # sets 3/5 circle about
+nrc_plot <- ggplot() +
+  
+  # init bars
+  geom_bar(aes(x = reorder(sentiment, n), 
+               y = n*10^-3, 
+               fill = sentiment), 
+           sentiment_summary_nrc %>% 
+             filter(!sentiment %in% c("positive", "negative")), 
+           stat = "identity", show.legend = FALSE) +
+  
+  # add count labels
+  geom_text(aes(x = sentiment, 
+                y = n*10^-3 + 5, 
+                label = round(n*10^-3, 1)), 
+            sentiment_summary_nrc %>% filter(!sentiment %in% c("positive", "negative")), 
+            family = "Gaegu", 
+            fontface = "bold") + 
+  
+  # add sentiment labels
+  geom_text(aes(x = sentiment, 
+                y = n*10^-3 + 25, 
+                label = sentiment, 
+                angle = txt_angle_val), 
+            sentiment_summary_nrc %>% filter(!sentiment %in% c("positive", "negative")), 
+            family = "Gaegu", 
+            fontface = "bold", 
+            size = 4) + 
+  
+  # make plot radial
+  coord_radial(inner.radius = 0.05,
+             start = -1.2*pi, end = 0.2*pi, # sets 3/5 circle about,
              ) + 
-  labs(x = "Sentiment",
-       y = "Count") +
-  scale_fill_manual(values = c("red", "orange1", "#cccc66", "grey40", "gold", "darkred", "lightgreen", "skyblue", "purple2", "green4")) + 
+  
+  # make sequential color scale
+  scale_fill_manual(values = scales::pal_seq_gradient("black", "khaki3")(seq(0,1, length.out = 8))) + 
+  
+  # thematic elements
   theme_minimal() + 
   theme(
     axis.title = element_blank(),
     plot.title = element_text(family = "Ink Free", face = "bold"), 
-    axis.text.theta = element_text(family = "Ink Free", face = "bold", color = "black"), 
-    panel.grid.major.y = element_line(color = "black", linewidth = 1), 
-    panel.grid.major.x = element_line(color = "grey40")
+#    axis.text.theta = element_text(family = "Gaegu", face = "bold", color = "black", size = 17),
+    panel.grid = element_blank(), 
+    axis.text = element_blank()
+    # panel.grid.major.y = element_line(color = "black", linewidth = 1), 
+    # panel.grid.major.x = element_line(color = "grey40")
   )
 
+  nrc_plot <- cowplot::ggdraw(nrc_plot) +
+  cowplot::draw_text('NRC sentiment analysis\nassigns words to emotions\n(fear, joy, etc).', x = 0.32, y = 0.8, angle = 0, size = 8, family = "Jua", fontface = "bold") + 
+    cowplot::draw_text('The higher the score,\nthe more words were\nassigned to that emotion.', x = 0.72, y = 0.7, angle = 0, size = 7, family = "Jua", fontface = "bold") + 
+    cowplot::draw_text('In other words,\nthere are more negative words\nused than positive words when\nthe news media talks about spiders', x = 0.72, y = 0.45, angle = 0, size = 6, family = "Jua", fontface = "bold")
+  
+  
 # draws axis label
-nrc_plot <- cowplot::ggdraw(nrc_plot) +
- cowplot::draw_text('Sentiment Score (10^3)', x = 0.7, y = 0.32, angle = 307, size = 11, family = "Just Me Again Down Here", fontface = "bold")
+# nrc_plot <- cowplot::ggdraw(nrc_plot) +
+#  cowplot::draw_text('Sentiment Score (10^3)', x = 0.7, y = 0.32, angle = 307, size = 11, family = "Just Me Again Down Here", fontface = "bold")
 
 nrc_plot
 
-ggsave('figs/myplot.png', nrc_plot, bg='transparent', width = 10, height = 8)
+ggsave('figs/nrc_plot.png', nrc_plot, bg='transparent', width = 10, height = 8)
+ggsave('figs/nrc_plot.svg', nrc_plot, bg='transparent', width = 10, height = 8)
 ```
 
 just getting medically relevant spiders here
@@ -356,7 +386,8 @@ get_mode <- function(x) {
 fam_med_counts <- spider_news_weighted %>% 
   group_by(Family) %>% 
   summarize(mean_bias = mean(Total_error), 
-            medically_relevant = get_mode(medically_relevant)) %>% 
+            medically_relevant = get_mode(medically_relevant), 
+            count = n()) %>% 
   ungroup() %>% 
   mutate(x_placement = case_when(
               medically_relevant == 0 ~ seq(-0.55, 0.30, length.out = n()), 
@@ -365,13 +396,23 @@ fam_med_counts <- spider_news_weighted %>%
   mutate(Family = tm::stripWhitespace(Family))
 
 # filter for portion of species
-spider_pnt_select <- filter(fam_med_counts, (medically_relevant == 0 & mean_bias > 3.5) | medically_relevant == 1)
+spider_pnt_select <- filter(fam_med_counts, (medically_relevant == 0 & mean_bias > 3) | medically_relevant == 1) %>% 
+  mutate(y_adjust = case_when(
+    Family == 'Actinopodidae' ~ 1,
+    .default = 0
+  ), 
+        x_adjust = case_when(
+          Family == 'Atracidae' ~ -0.07, 
+          Family %in% c('Ctenidae', 'Theridiidae') ~ 0.07, 
+          .default = 0
+        )
+)
 
 # get mean bias by medical relevance
 med_rel_counts <- fam_med_counts %>% 
   group_by(medically_relevant) %>% 
   summarize(mean_bias = mean(mean_bias), 
-            count = n())
+            count = sum(count))
 
 # set up df to plot spider legs
 curve_params <- data.frame(
@@ -394,11 +435,11 @@ med_plot <- ggplot() +
      data = med_rel_counts, 
      aes(
        x = medically_relevant, 
-       y = count,, 
+       y = count * 10e-3,
        group = medically_relevant
        ), 
      fill = "burlywood", 
-     alpha = 0.5) + 
+     alpha = 0.8) + 
   
   # add bias counts
   ggplot2::annotate("text", 
@@ -406,7 +447,8 @@ med_plot <- ggplot() +
                     y = 41, 
                     label = c(round(med_rel_counts$mean_bias[1], 2), 
                               round(med_rel_counts$mean_bias[2], 2)), 
-                    family = "Mansalva", 
+                    family = "Gaegu", 
+                    fontface = "bold",
                     size = 5.5) +
   # labeling for the prior
   ggplot2::annotate("text", 
@@ -414,12 +456,13 @@ med_plot <- ggplot() +
                     y = 44, 
                     label = "~~~~Average Bias~~~~", 
                     family = "Gaegu", 
+                    fontface = "bold",
                     size = 5.5) +
   
-  # add points for lolipop chard 
+  # add points for lolipop chart 
    geom_point(
      data = filter(fam_med_counts, 
-                   medically_relevant == 0 & mean_bias > 3.5), 
+                   medically_relevant == 0 & mean_bias > 3), 
      aes(x_placement, mean_bias*5), size = 4) + 
    geom_point(
      data = filter(fam_med_counts, 
@@ -429,7 +472,7 @@ med_plot <- ggplot() +
    # segments for loliipop chart
    geom_segment(
      data = filter(fam_med_counts, 
-                   medically_relevant == 0 & mean_bias > 3.5), 
+                   medically_relevant == 0 & mean_bias > 3), 
      aes(
        x = x_placement, 
        xend = x_placement, 
@@ -448,41 +491,118 @@ med_plot <- ggplot() +
   
 ####--------LEGS START HERE----------   
 
-  geom_curve( 
+  geom_curve(
     data = filter(curve_params, curvature == 0.5),
     aes(
       x = x_placement+x_add,
       y = y*y_mult*0.98,
       xend = x_placement,
       yend = y*5,
-    ), 
+    ),
     curvature = 0.5
-  ) + 
-  geom_curve( 
+  ) +
+  geom_curve(
     data = filter(curve_params, curvature == -0.5),
     aes(
       x = x_placement+x_add,
       y = y*y_mult*0.98,
       xend = x_placement,
       yend = y*5,
-    ), 
+    ),
     curvature = -0.5
-  ) + 
+  ) +
+
+  geom_curve(
+     data = filter(fam_med_counts,
+                   medically_relevant == 1 | mean_bias > 3),
+     aes(
+       x = x_placement+0.01,
+       xend = x_placement,
+       y = mean_bias*5+2.8-0.8,
+       yend = mean_bias*5
+       )) +
+  geom_curve(
+     data = filter(fam_med_counts,
+                   medically_relevant == 1 | mean_bias > 3),
+     aes(
+       x = x_placement+0.025,
+       xend = x_placement,
+       y = mean_bias*5+2.7-0.8,
+       yend = mean_bias*5
+       )) +
+  geom_curve(
+     data = filter(fam_med_counts,
+                   medically_relevant == 1 | mean_bias > 3),
+     aes(
+       x = x_placement+0.035,
+       xend = x_placement,
+       y = mean_bias*5+2.5-0.8,
+       yend = mean_bias*5
+       )) +
+  geom_curve(
+     data = filter(fam_med_counts,
+                   medically_relevant == 1 | mean_bias > 3),
+     aes(
+       x = x_placement+0.05,
+       xend = x_placement,
+       y = mean_bias*5+2-0.8,
+       yend = mean_bias*5
+       )) +
+
+
+  geom_curve(
+     data = filter(fam_med_counts,
+                   medically_relevant == 1 | mean_bias > 3),
+     aes(
+       x = x_placement-0.01,
+       xend = x_placement,
+       y = mean_bias*5+2.8-0.8,
+       yend = mean_bias*5
+       ),
+     curvature = -0.5) +
+  geom_curve(
+     data = filter(fam_med_counts,
+                   medically_relevant == 1 | mean_bias > 3),
+     aes(
+       x = x_placement-0.025,
+       xend = x_placement,
+       y = mean_bias*5+2.7-0.8,
+       yend = mean_bias*5
+       ),
+     curvature = -0.5) +
+  geom_curve(
+     data = filter(fam_med_counts,
+                   medically_relevant == 1 | mean_bias > 3),
+     aes(
+       x = x_placement-0.035,
+       xend = x_placement,
+       y = mean_bias*5+2.5-0.8,
+       yend = mean_bias*5
+       ),
+     curvature = -0.5) +
+  geom_curve(
+     data = filter(fam_med_counts,
+                   medically_relevant == 1 | mean_bias > 3),
+     aes(
+       x = x_placement-0.05,
+       xend = x_placement,
+       y = mean_bias*5+2-0.8,
+       yend = mean_bias*5
+       ),
+     curvature = -0.5) +
 
 ####--------END LEGS----------
 
   # family text labels
-  geom_text(
-    data = spider_pnt_select, 
-    aes(
-      x = x_placement,
-      y = mean_bias * log(mean_bias*4)+14,
-      label = Family, 
-      family = "Sue Ellen Francisco "
-    ),
-    check_overlap = TRUE, 
-    position = position_dodge2(padding = 1, width = 0.1)
-  ) +
+  # geom_text(
+  #   data = spider_pnt_select, 
+  #   aes(
+  #     x = x_placement + x_adjust,
+  #     y = mean_bias * (5.9 + y_adjust),
+  #     label = Family, 
+  #     family = "Gaegu"
+  #   )
+  # ) +
 
   # make continuous scale appear discrete
    scale_x_continuous(labels = c("","Not Medically Signficant", "", 
@@ -500,14 +620,16 @@ med_plot <- ggplot() +
    scale_fill_gradient(high = 'brown2', low = 'brown4', breaks = NULL) + 
   
    labs(x = "", 
-        y = "Number of Species/Family", 
+        y = "Number of News Articles by Family and Medical Relevance", 
         title = "Of the spiders in the news,\nwhich should we even be concerned about?") +
    theme(
-     panel.background = element_blank(), 
-         axis.text = element_text(family = "Indie Flower", 
+         panel.background = element_rect(fill='transparent'), 
+         plot.background = element_rect(fill='transparent', color=NA), 
+         panel.grid = element_blank(), 
+         axis.text = element_text(family = "Gaegu", 
                                   face = "bold",
                                   size = 15), 
-         axis.title = element_text(family = "Indie Flower"), 
+         axis.title = element_text(family = "Gaegu"), 
          plot.title = element_text(family = "Jua", 
                                    size = 20, 
                                    hjust = 0.5))
@@ -515,7 +637,8 @@ med_plot <- ggplot() +
 
 med_plot
 
-ggsave('figs/med_plot.png', med_plot, bg='transparent', width = 8, height = 10)
+ggsave('figs/med_plot.png', med_plot, bg='transparent', width = 8, height = 9)
+ggsave('figs/med_plot.svg', med_plot, bg='transparent', width = 8, height = 9)
 ```
 chance of dying in the us... (per 100k people)
 * from a venomous spider: 0.000078% (7.8)
@@ -610,5 +733,237 @@ chance_plot <- ggplot(deaths_clean, aes(factor(cause, levels = cause), y_val, si
 chance_plot
 
 ggsave('figs/chance_plot.png', chance_plot, bg='transparent', width = 10, height = 8)
+ggsave('figs/chance_plot.svg', chance_plot, bg='transparent', width = 10, height = 8)
 ```
 
+
+
+
+Karner, A., Zhang, M., Lor, C. S., Steyrl, D., Götzendorfer, S. J., Weidt, S., ... & Scharnowski, F. (2024). The “SpiDa” dataset: self-report questionnaires and ratings of spider images from spider-fearful individuals. Frontiers in Psychology, 15, 1327367.
+
+```{r}
+
+full_tol <- data.frame(
+  tol_score = c(spider_tolerance$FSQ_1_sum, spider_tolerance$FSQ_2_sum, spider_tolerance$FSQ_3_sum),
+  participant = rep(spider_tolerance$participant, 3),
+  trial = rep(c("1", "2", "3"), each = length(spider_tolerance$participant))
+) %>% 
+  mutate(score_bin = ntile(tol_score, 10))
+
+group_tol <- data_frame(
+  participant = rep(spider_tolerance$participant, 3), 
+  score_tol = c(spider_tolerance$FSQ_1_sum, spider_tolerance$FSQ_2_sum, spider_tolerance$FSQ_3_sum), 
+  score_bin = c(spider_tolerance$FSQ_1_sum, spider_tolerance$FSQ_2_sum, spider_tolerance$FSQ_3_sum) %>% ntile(2), 
+  trial = rep(c("1", "2", "3"), each = length(spider_tolerance$participant))) %>% 
+  group_by(score_bin, trial) %>%
+  reframe(score_tol = mean(score_tol, na.rm = TRUE))
+
+full_tol_mean <- full_tol %>% 
+  group_by(trial) %>% 
+  summarize(tol_score = mean(tol_score, na.rm = TRUE)) %>% 
+  ungroup()
+
+
+  
+
+before_low <- group_tol %>% filter(trial == 1 & score_bin == 1) %>% select(score_tol) %>% as.numeric()
+after_low <- group_tol %>% filter(trial == 3 & score_bin == 1) %>% select(score_tol) %>% as.numeric()
+pct_change_low <- ((after_low - before_low)/before_low) * 100
+  
+before_high <- group_tol %>% filter(trial == 1 & score_bin == 2) %>% select(score_tol) %>% as.numeric()
+after_high <- group_tol %>% filter(trial == 3 & score_bin == 2) %>% select(score_tol) %>% as.numeric()
+pct_change_high <- ((after_high - before_high)/before_high) * 100
+
+before_mean <- full_tol_mean %>% filter(trial == 1) %>% select(tol_score) %>% as.numeric()
+after_mean <- full_tol_mean %>% filter(trial == 3) %>% select(tol_score) %>% as.numeric()
+pct_change <- ((after_mean - before_mean)/before_mean) * 100
+```
+
+```{r}
+effect_df <- data_frame(
+  before = spider_tolerance$FSQ_1_sum,
+  after = spider_tolerance$FSQ_3_sum, 
+  difference = after - before
+) %>% 
+#  mutate(difference = replace_na(difference, 999))
+  filter(is.na(difference) == FALSE)
+
+decrease <- effect_df %>% filter(difference < 0) %>% nrow()
+tot <- effect_df %>% nrow()
+
+pct_benefit <- decrease/tot
+
+
+```
+
+```{r}
+exposure_plot <- ggplot() +
+  
+  # mapping high and low lines
+   geom_line(data = group_tol, 
+             mapping = aes(trial, score_tol, 
+                           group = score_bin, 
+                           color = score_bin
+                           ), 
+             lwd = 2, 
+             lty = 6
+             ) + 
+  # mapping mean line
+  geom_line(data = full_tol_mean, 
+            mapping = aes(factor(trial), 
+                          tol_score, 
+                          group = 1
+                          ), 
+            lwd = 3,
+            color = 'navajowhite4'
+            ) + 
+  
+  
+  
+  
+  # high and low slopes
+  geom_line(data = group_tol %>% mutate(
+    score_tol = ifelse(trial == 2, NA, score_tol)) %>% 
+      drop_na(), 
+            mapping = aes(trial, score_tol, 
+                           group = score_bin, 
+                           color = score_bin
+                           ), 
+             lwd = 1, 
+             lty = 4,
+             alpha = 0.6
+    ) + 
+  
+  # mean slope
+  geom_line(data = full_tol_mean %>% mutate(
+    tol_score = ifelse(trial == 2, NA, tol_score)) %>% 
+      drop_na(), 
+            mapping = aes(factor(trial), 
+                          tol_score, 
+                          group = 1
+                          ), 
+            lwd = 1, 
+            lty = 4
+    ) + 
+  
+  
+  
+  
+   # high and low points
+  geom_point(data = group_tol %>% mutate(
+    score_tol = ifelse(trial == 2, NA, score_tol)) %>% 
+      drop_na(), 
+            mapping = aes(trial, score_tol, 
+                           group = score_bin
+                           ), 
+    size = 5, 
+    alpha = 0.5
+    ) + 
+  
+  # mean points
+  geom_point(data = full_tol_mean %>% mutate(
+    tol_score = ifelse(trial == 2, NA, tol_score)) %>% 
+      drop_na(), 
+            mapping = aes(factor(trial), 
+                          tol_score, 
+                          group = 1
+                          ), 
+    size = 5, 
+    alpha = 0.5
+    ) + 
+  
+  
+  
+  
+  
+  
+  # slope labels
+  ggplot2::annotate("text", 
+            x = c(2,2,2,
+                  0.6,3.4,3.4), 
+            y = c(38,57,76,
+                  42,50,73
+                         ), 
+            label = c(
+              paste0("Change: ", round(pct_change_low, 2), " %"), 
+              paste0("Change: ", round(pct_change, 2), " %"), 
+              paste0("Change: ", round(pct_change_high, 2), " %"),
+              
+              paste("Exposure therapy\nwas most\nlikely to \nhave a beneficial\neffect in individuals\nwith less fear\nto begin with."), 
+              paste("But,\non average,\nexposure\ndecreases fear."), 
+              paste("Individuals\nwith high\namounts of\narachnophobia\nwill likely remain fearful\nregardless of exposure.")
+              ), 
+            family = 'Jua', 
+            angle = c(-7.517, -4.792, 1.362, 
+                      0, 0, 0), 
+            size = c(4,4,4,
+                     4.5,4.5,4.5)
+           ) + 
+  
+  
+  
+  
+  
+  # high and low num labels
+  geom_text(data = group_tol %>% mutate(
+    score_tol = ifelse(trial == 2, NA, score_tol)), 
+            mapping = aes(factor(trial), score_tol, label = round(score_tol,2)), 
+    nudge_y = 3, 
+    size = 5, 
+    family = "Jua") + 
+  
+  # mean num labels
+  geom_text(data = full_tol_mean %>% mutate(
+    tol_score = ifelse(trial == 2, NA, tol_score)), 
+            mapping = aes(factor(trial), tol_score, label = round(tol_score,2)), 
+    nudge_y = 3, 
+    size = 5, 
+    family = "Jua") + 
+  
+  labs(x = "Fear of Spiders Questionaire Trial", 
+       y = "Mean Score", 
+       title = "What can we do about it?", 
+       subtitle = "Karner (2024) investigated the power of exposure therapy.", 
+       caption = "____________________________________________________\nFSQ derived from Szymanski & Donohue (1995).\nTrials 1,2 and 3, done before, during, and after therapy respectively.") + 
+  
+  
+  
+  
+  
+  
+  coord_cartesian(clip = "off", 
+                  xlim = c(0.8,3.3)) +
+  
+  
+  
+  
+  scale_color_gradient(high = "grey20", low = "lemonchiffon4", breaks = NULL) +
+  
+  
+  
+
+  theme_minimal() + 
+  
+  theme(panel.grid = element_blank(), 
+        axis.title = element_text(family = 'Gaegu', 
+                                  face = "bold", 
+                                  size = 20), 
+        axis.text = element_text(family = 'Gaegu', 
+                                  face = "bold", 
+                                  size = 20), 
+        plot.title = element_text(hjust = 0.5,
+                                  size = 30,
+                                  family = 'Gaegu',
+                                  face = "bold"),
+        plot.caption = element_text(size = 15,
+                                  family = 'Gaegu',
+                                  face = "bold"), 
+        plot.subtitle = element_text(hjust = 0.5,
+                                  size = 18,
+                                  family = 'Gaegu',
+                                  face = "bold"))
+
+
+ggsave('figs/exposure_plot.png', exposure_plot, bg='transparent', width = 10, height = 8)
+ggsave('figs/exposure_plot.svg', exposure_plot, bg='transparent', width = 10, height = 8)
+```

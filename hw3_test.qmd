@@ -1129,8 +1129,238 @@ spider_tol_wide <- c() %>% rbind(spider_tolerance$participant,
                                  spider_tolerance$FSQ_1_sum, 
                                  spider_tolerance$FSQ_2_sum, 
                                  spider_tolerance$FSQ_3_sum) %>% 
-  as_data_frame() %>% 
-  cbind(c("participants", "FSQ_1_sum","FSQ_2_sum", "FSQ_3_sum")) %>% 
-  ggplot(aes(x = ))
+  as_data_frame() %>%
+   cbind(rows = c("participants", "FSQ_1_sum","FSQ_2_sum", "FSQ_3_sum")) %>% 
+  column_to_rownames("rows")
+
+
+plot_data_column <- function(data, column) {
+    ggplot(data, aes_string(x = column)) +
+        geom_histogram(fill = "lightgreen") +
+        xlab(column)
+}
+
+myplots <- lapply(colnames(data2), plot_data_column, data = data2)
+
+full_tol <- data.frame(
+  tol_score = c(spider_tolerance$FSQ_1_sum, spider_tolerance$FSQ_2_sum, spider_tolerance$FSQ_3_sum),
+  participant = rep(spider_tolerance$participant, 3),
+  trial = rep(c("1", "2", "3"), each = length(spider_tolerance$participant))
+) %>% 
+  mutate(score_bin = ntile(tol_score, 10))
+
+group_tol <- data_frame(
+  participant = rep(spider_tolerance$participant, 3), 
+  score_tol = c(spider_tolerance$FSQ_1_sum, spider_tolerance$FSQ_2_sum, spider_tolerance$FSQ_3_sum), 
+  score_bin = c(spider_tolerance$FSQ_1_sum, spider_tolerance$FSQ_2_sum, spider_tolerance$FSQ_3_sum) %>% ntile(2), 
+  trial = rep(c("1", "2", "3"), each = length(spider_tolerance$participant))) %>% 
+  group_by(score_bin, trial) %>%
+  reframe(score_tol = mean(score_tol, na.rm = TRUE))
+
+full_tol_mean <- full_tol %>% 
+  group_by(trial) %>% 
+  summarize(tol_score = mean(tol_score, na.rm = TRUE)) %>% 
+  ungroup()
+
+
+  
+
+before_low <- group_tol %>% filter(trial == 1 & score_bin == 1) %>% select(score_tol) %>% as.numeric()
+after_low <- group_tol %>% filter(trial == 3 & score_bin == 1) %>% select(score_tol) %>% as.numeric()
+pct_change_low <- ((after_low - before_low)/before_low) * 100
+  
+before_high <- group_tol %>% filter(trial == 1 & score_bin == 2) %>% select(score_tol) %>% as.numeric()
+after_high <- group_tol %>% filter(trial == 3 & score_bin == 2) %>% select(score_tol) %>% as.numeric()
+pct_change_high <- ((after_high - before_high)/before_high) * 100
+
+before_mean <- full_tol_mean %>% filter(trial == 1) %>% select(tol_score) %>% as.numeric()
+after_mean <- full_tol_mean %>% filter(trial == 3) %>% select(tol_score) %>% as.numeric()
+pct_change <- ((after_mean - before_mean)/before_mean) * 100
 ```
 
+```{r}
+effect_df <- data_frame(
+  before = spider_tolerance$FSQ_1_sum,
+  after = spider_tolerance$FSQ_3_sum, 
+  difference = after - before
+) %>% 
+#  mutate(difference = replace_na(difference, 999))
+  filter(is.na(difference) == FALSE)
+
+decrease <- effect_df %>% filter(difference < 0) %>% nrow()
+tot <- effect_df %>% nrow()
+
+pct_benefit <- decrease/tot
+
+
+```
+
+```{r}
+ggplot() +
+  
+  # mapping high and low lines
+   geom_line(data = group_tol, 
+             mapping = aes(trial, score_tol, 
+                           group = score_bin, 
+                           color = score_bin
+                           ), 
+             lwd = 2, 
+             lty = 6
+             ) + 
+  # mapping mean line
+  geom_line(data = full_tol_mean, 
+            mapping = aes(factor(trial), 
+                          tol_score, 
+                          group = 1
+                          ), 
+            lwd = 3,
+            color = 'navajowhite4'
+            ) + 
+  
+  
+  
+  
+  # high and low slopes
+  geom_line(data = group_tol %>% mutate(
+    score_tol = ifelse(trial == 2, NA, score_tol)) %>% 
+      drop_na(), 
+            mapping = aes(trial, score_tol, 
+                           group = score_bin, 
+                           color = score_bin
+                           ), 
+             lwd = 1, 
+             lty = 4,
+             alpha = 0.6
+    ) + 
+  
+  # mean slope
+  geom_line(data = full_tol_mean %>% mutate(
+    tol_score = ifelse(trial == 2, NA, tol_score)) %>% 
+      drop_na(), 
+            mapping = aes(factor(trial), 
+                          tol_score, 
+                          group = 1
+                          ), 
+            lwd = 1, 
+            lty = 4
+    ) + 
+  
+  
+  
+  
+   # high and low points
+  geom_point(data = group_tol %>% mutate(
+    score_tol = ifelse(trial == 2, NA, score_tol)) %>% 
+      drop_na(), 
+            mapping = aes(trial, score_tol, 
+                           group = score_bin
+                           ), 
+    size = 5, 
+    alpha = 0.5
+    ) + 
+  
+  # mean points
+  geom_point(data = full_tol_mean %>% mutate(
+    tol_score = ifelse(trial == 2, NA, tol_score)) %>% 
+      drop_na(), 
+            mapping = aes(factor(trial), 
+                          tol_score, 
+                          group = 1
+                          ), 
+    size = 5, 
+    alpha = 0.5
+    ) + 
+  
+  
+  
+  
+  
+  
+  # slope labels
+  ggplot2::annotate("text", 
+            x = c(2,2,2,
+                  0.6,3.4,3.4), 
+            y = c(38,57,76,
+                  42,50,73
+                         ), 
+            label = c(
+              paste0("Change: ", round(pct_change_low, 2), " %"), 
+              paste0("Change: ", round(pct_change, 2), " %"), 
+              paste0("Change: ", round(pct_change_high, 2), " %"),
+              
+              paste("Exposure therapy\nwas most\nlikely to \nhave a beneficial\neffect in individuals\nwith less fear\nto begin with."), 
+              paste("But,\non average,\nexposure\ndecreases fear."), 
+              paste("Individuals\nwith high\namounts of\narachnophobia\nwill likely remain fearful\nregardless of exposure.")
+              ), 
+            family = 'Jua', 
+            angle = c(-7.517, -4.792, 1.362, 
+                      0, 0, 0), 
+            size = c(4,4,4,
+                     3.5,3.5,3.5)
+           ) + 
+  
+  
+  
+  
+  
+  # high and low num labels
+  geom_text(data = group_tol %>% mutate(
+    score_tol = ifelse(trial == 2, NA, score_tol)), 
+            mapping = aes(factor(trial), score_tol, label = round(score_tol,2)), 
+    nudge_y = 3, 
+    size = 5, 
+    family = "Jua") + 
+  
+  # mean num labels
+  geom_text(data = full_tol_mean %>% mutate(
+    tol_score = ifelse(trial == 2, NA, tol_score)), 
+            mapping = aes(factor(trial), tol_score, label = round(tol_score,2)), 
+    nudge_y = 3, 
+    size = 5, 
+    family = "Jua") + 
+  
+  labs(x = "Fear of Spiders Questionaire Trial", 
+       y = "Mean Score", 
+       title = "What can we do about it?", 
+       subtitle = "Karner (2024) investigated the power of exposure therapy.", 
+       caption = "____________________________________________________\nFSQ derived from Szymanski & Donohue (1995).\nTrials 1,2 and 3, done before, during, and after therapy respectively.") + 
+  
+  
+  
+  
+  
+  
+  coord_cartesian(clip = "off", 
+                  xlim = c(0.8,3.3)) +
+  
+  
+  
+  
+  scale_color_gradient(high = "grey20", low = "lightblue3", breaks = NULL) +
+  
+  
+  
+
+  theme_minimal() + 
+  
+  theme(panel.grid = element_blank(), 
+        axis.title = element_text(family = 'Gaegu', 
+                                  face = "bold", 
+                                  size = 20), 
+        axis.text = element_text(family = 'Gaegu', 
+                                  face = "bold", 
+                                  size = 20), 
+        plot.title = element_text(hjust = 0.5,
+                                  size = 30,
+                                  family = 'Gaegu',
+                                  face = "bold"),
+        plot.caption = element_text(size = 15,
+                                  family = 'Gaegu',
+                                  face = "bold"), 
+        plot.subtitle = element_text(hjust = 0.5,
+                                  size = 18,
+                                  family = 'Gaegu',
+                                  face = "bold"))
+```
+
+Karner, A., Zhang, M., Lor, C. S., Steyrl, D., Götzendorfer, S. J., Weidt, S., ... & Scharnowski, F. (2024). The “SpiDa” dataset: self-report questionnaires and ratings of spider images from spider-fearful individuals. Frontiers in Psychology, 15, 1327367.
